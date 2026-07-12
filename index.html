@@ -25,7 +25,7 @@
         max-width: 350px;
         font-weight: bold;
         font-size: 18px;
-        background-color: #444; 
+        background-color: #444;
         color: white;
         border: 2px solid #555;
         transition: 0.3s;
@@ -39,6 +39,20 @@
         border-color: #3e8e41 !important;
       }
       /* ---------------------------------------- */
+
+      /* --- THÊM MỚI ODOMETRY: CSS khung Tốc độ --- */
+      #telemetryBox {
+        margin: 10px auto 25px auto;
+        padding: 15px;
+        border-radius: 10px;
+        max-width: 350px;
+        font-weight: bold;
+        font-size: 18px;
+        background-color: #1e88e5;
+        color: white;
+        border: 2px solid #1565c0;
+      }
+      /* ------------------------------------------- */
 
       .btn {
         background-color: #4caf50;
@@ -81,15 +95,17 @@
       const broker = "wss://broker.emqx.io:8084/mqtt";
       const topic_control = "hust/iot/rccar/control_v1";
       const topic_warn = "hust/iot/rccar/warning_v1"; // Topic nhận cảnh báo
+      const topic_telemetry = "hust/iot/rccar/telemetry_v1"; // Topic nhận tốc độ
 
       const client = mqtt.connect(broker);
 
       client.on("connect", function () {
         document.getElementById("status").innerText = "Đã kết nối Server MQTT";
         document.getElementById("status").style.color = "lightgreen";
-        
-        // --- THÊM MỚI: Đăng ký nhận tin nhắn cảnh báo ---
+
+        // --- THÊM MỚI: Đăng ký nhận tin nhắn cảnh báo & tốc độ ---
         client.subscribe(topic_warn);
+        client.subscribe(topic_telemetry);
       });
 
       client.on("offline", function () {
@@ -102,14 +118,26 @@
         if (topic === topic_warn) {
           let msgStr = message.toString();
           let warnBox = document.getElementById("warningBox");
-          
+
           warnBox.innerText = msgStr;
 
           // Đổi màu box tùy theo nội dung cảnh báo
           if (msgStr.includes("CẢNH BÁO")) {
             warnBox.className = "alert-danger"; // Chuyển nền đỏ
           } else if (msgStr.includes("AN TOÀN")) {
-            warnBox.className = "alert-safe";   // Chuyển nền xanh
+            warnBox.className = "alert-safe"; // Chuyển nền xanh
+          }
+        }
+        // --- THÊM MỚI ODOMETRY: Tách chuỗi hiển thị tốc độ ---
+        else if (topic === topic_telemetry) {
+          let data = message.toString().split("|"); // Tách bằng ký tự "|"
+          if (data.length === 2) {
+            document.getElementById("telemetryBox").innerHTML =
+              "Vận tốc: " +
+              data[0] +
+              " cm/s <br> Quãng đường đi: " +
+              data[1] +
+              " cm";
           }
         }
       });
@@ -125,10 +153,17 @@
   <body>
     <h2>ĐIỀU KHIỂN XE MQTT</h2>
     <div id="status">Đang kết nối Server...</div>
-    
-    <!-- --- THÊM MỚI: Khung hiển thị cảnh báo --- -->
+
+    <!-- --- THÊM MỚI: Khung hiển thị cảnh báo (Siêu âm) --- -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
     <!-- ----------------------------------------- -->
+
+    <!-- --- THÊM MỚI ODOMETRY: Khung hiển thị Vận tốc (Encoder) --- -->
+    <div id="telemetryBox">
+      Vận tốc: 0 cm/s <br />
+      Quãng đường đi: 0 cm
+    </div>
+    <!-- ------------------------------------------------- -->
 
     <div class="grid">
       <div class="empty"></div>

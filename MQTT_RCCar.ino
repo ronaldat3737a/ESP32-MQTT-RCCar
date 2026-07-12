@@ -29,6 +29,19 @@ bool isBlocked = false;            // Cờ đánh dấu xe đang bị chặn
 unsigned long lastMeasureTime = 0; // Bộ đếm thời gian đo khoảng cách
 // -----------------------------------------------------
 
+// --- ĐOẠN THÊM MỚI ODOMETRY: Biến Encoder ---
+const int ENCODER_PIN = 27; // Chân D27 nối với D0 của LM393
+const char* mqtt_topic_telemetry = "hust/iot/rccar/telemetry_v1"; // Topic gửi tốc độ
+
+const float WHEEL_DIAMETER = 6.5; // Đường kính bánh xe (cm)
+const int ENCODER_HOLES = 20;     // Số lỗ trên đĩa encoder
+const float CM_PER_PULSE = (3.14159 * WHEEL_DIAMETER) / ENCODER_HOLES; // Quãng đường 1 xung
+
+volatile unsigned long pulseCount = 0; // Biến đếm xung ngắt
+float totalDistance = 0.0;             // Tổng quãng đường (cm)
+unsigned long lastOdoTime = 0;         // Bộ đếm thời gian đo tốc độ
+// --------------------------------------------
+
 // Điều khiển động cơ
 void forward() {
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
@@ -74,6 +87,12 @@ float getDistance() {
   return duration * 0.034 / 2;     // Trả về khoảng cách (cm)
 }
 // -----------------------------------------------
+
+// --- ĐOẠN THÊM MỚI ODOMETRY: Hàm ngắt đếm xung ---
+void IRAM_ATTR countPulse() {
+  pulseCount++;
+}
+// -------------------------------------------------
 
 void setup_wifi() {
   delay(10);
@@ -148,6 +167,11 @@ void setup() {
   pinMode(ECHO_PIN, INPUT);
   // ---------------------------------------------------
 
+  // --- ĐOẠN THÊM MỚI ODOMETRY: Cấu hình ngắt ---
+  pinMode(ENCODER_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, FALLING);
+  // ---------------------------------------------
+
   pinMode(enA, OUTPUT); pinMode(enB, OUTPUT);
   pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
@@ -192,4 +216,30 @@ void loop() {
     }
   }
   // --------------------------------------------------------------
+  // --- ĐOẠN THÊM MỚI ODOMETRY: Tính Tốc độ & Quãng đường (chu kỳ 1 giây) ---
+  if (millis() - lastOdoTime > 1000) {
+    float deltaTime = (millis() - lastOdoTime) / 1000.0; 
+    lastOdoTime = millis();
+
+    // Dừng ngắt tạm thời để lấy số xung an toàn
+    noInterrupts();
+    unsigned long currentPulses = pulseCount;
+    pulseCount = 0; // Reset đếm xung cho chu kỳ tới
+    interrupts();
+
+    // Tính toán quãng đường và vận tốc
+    float distanceTraveled = currentPulses * CM_PER_PULSE; 
+    totalDistance += distanceTraveled;                     
+    float speed = distanceTraveled / deltaTime;            
+
+    // Ghép chuỗi gửi lên MQTT: "Vận_tốc|Quãng_đường"
+    String teleMsg = String(speed, 1) + "|" + String(totalDistance, 1);
+    client.publish(mqtt_topic_telemetry, teleMsg.c_str());
+    
+    // In ra Serial Monitor
+    Serial.print("ODOMETRY - Vận tốc: "); Serial.print(speed);
+    Serial.print(" cm/s | Quãng đường: "); Serial.print(totalDistance); Serial.println(" cm");
+  }
+  // -------------------------------------------------------------------------
+
 }
