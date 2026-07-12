@@ -6,26 +6,26 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
     <meta charset="utf-8" />
-    <title>MQTT ESP32 RC Car</title>
+    <title>MQTT ESP32 RC Car Dashboard</title>
 
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
       body {
         text-align: center;
-        font-family: Arial;
-        margin-top: 30px;
-        background-color: #222;
+        font-family: Arial, sans-serif;
+        margin-top: 20px;
+        background-color: #1a1a1a;
         color: white;
       }
-      /* --- THÊM MỚI: CSS cho khung cảnh báo --- */
+      /* --- Khung cảnh báo (Siêu âm) --- */
       #warningBox {
-        margin: 15px auto;
-        padding: 15px;
-        border-radius: 10px;
+        margin: 10px auto;
+        padding: 12px;
+        border-radius: 8px;
         max-width: 350px;
         font-weight: bold;
-        font-size: 18px;
-        background-color: #444;
+        font-size: 16px;
+        background-color: #444; 
         color: white;
         border: 2px solid #555;
         transition: 0.3s;
@@ -38,49 +38,82 @@
         background-color: #4caf50 !important;
         border-color: #3e8e41 !important;
       }
-      /* ---------------------------------------- */
 
-      /* --- THÊM MỚI ODOMETRY: CSS khung Tốc độ --- */
+      /* --- Khung Vận tốc (Odometry) --- */
       #telemetryBox {
-        margin: 10px auto 25px auto;
-        padding: 15px;
-        border-radius: 10px;
+        margin: 10px auto;
+        padding: 12px;
+        border-radius: 8px;
         max-width: 350px;
         font-weight: bold;
-        font-size: 18px;
-        background-color: #1e88e5;
+        font-size: 16px;
+        background-color: #1e88e5; 
         color: white;
         border: 2px solid #1565c0;
       }
-      /* ------------------------------------------- */
 
+      /* --- THÊM MỚI: Bản đồ 2D (Canvas) --- */
+      .map-container {
+        margin: 15px auto;
+        max-width: 350px;
+        background-color: #000;
+        border: 3px solid #333;
+        border-radius: 10px;
+        position: relative;
+        box-shadow: 0 0 15px rgba(76, 175, 80, 0.2);
+      }
+      #mapCanvas {
+        display: block;
+        width: 100%;
+        border-radius: 7px;
+      }
+      .btn-reset {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        background-color: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: 1px solid white;
+        padding: 5px 10px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .btn-reset:active { background-color: rgba(255,255,255,0.5); }
+      /* ------------------------------------- */
+
+      /* --- Các nút điều khiển --- */
       .btn {
         background-color: #4caf50;
         border: none;
         color: white;
-        padding: 20px;
-        font-size: 30px;
+        padding: 15px;
+        font-size: 28px;
         border-radius: 15px;
-        width: 100px;
-        height: 100px;
-        margin: 10px;
+        width: 80px;
+        height: 80px;
+        margin: 5px;
         user-select: none;
         -webkit-user-select: none;
+        box-shadow: 0 4px #2e7d32;
       }
       .btn:active {
         background-color: #3e8e41;
+        box-shadow: 0 1px #2e7d32;
+        transform: translateY(3px);
       }
       .btn-stop {
         background-color: #f44336;
+        box-shadow: 0 4px #c62828;
       }
       .btn-stop:active {
         background-color: #da190b;
+        box-shadow: 0 1px #c62828;
       }
       .grid {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
-        max-width: 400px;
-        margin: 0 auto;
+        max-width: 300px;
+        margin: 15px auto;
       }
       .empty {
         visibility: hidden;
@@ -94,16 +127,37 @@
     <script>
       const broker = "wss://broker.emqx.io:8084/mqtt";
       const topic_control = "hust/iot/rccar/control_v1";
-      const topic_warn = "hust/iot/rccar/warning_v1"; // Topic nhận cảnh báo
-      const topic_telemetry = "hust/iot/rccar/telemetry_v1"; // Topic nhận tốc độ
+      const topic_warn = "hust/iot/rccar/warning_v1"; 
+      const topic_telemetry = "hust/iot/rccar/telemetry_v1"; 
 
       const client = mqtt.connect(broker);
+
+      // --- BIẾN TOÀN CỤC CHO BẢN ĐỒ 2D ---
+      let currentCommand = 'S'; // Trạng thái hiện tại (F, B, L, R, S)
+      
+      let posX = 175; // Tọa độ X ban đầu (Giữa Canvas width=350)
+      let posY = 150; // Tọa độ Y ban đầu (Giữa Canvas height=300)
+      let angleDeg = 0; // Góc quay (0 độ = Hướng lên trên)
+      
+      let path = [{x: posX, y: posY}]; // Mảng lưu các điểm đã đi qua
+      
+      let isTurning = 0; // -1: Xoay trái, 1: Xoay phải, 0: Đứng yên/Đi thẳng
+      let lastTime = Date.now();
+      let lastDistance = -1; // Khoảng cách đo được ở chu kỳ trước
+      let currentTotalDistance = 0;
+
+      // THÔNG SỐ TINH CHỈNH: Tốc độ xoay của xe (Độ/giây). 
+      // Hãy sửa số này nếu xe thật xoay nhanh/chậm hơn trên web.
+      const TURN_SPEED_DEG_PER_SEC = 90; 
+      
+      // THÔNG SỐ TINH CHỈNH: Tỉ lệ vẽ (1 cm thực tế = ? pixel trên màn hình)
+      const PIXELS_PER_CM = 2.0; 
+      // -----------------------------------
 
       client.on("connect", function () {
         document.getElementById("status").innerText = "Đã kết nối Server MQTT";
         document.getElementById("status").style.color = "lightgreen";
-
-        // --- THÊM MỚI: Đăng ký nhận tin nhắn cảnh báo & tốc độ ---
+        
         client.subscribe(topic_warn);
         client.subscribe(topic_telemetry);
       });
@@ -113,58 +167,149 @@
         document.getElementById("status").style.color = "red";
       });
 
-      // --- THÊM MỚI: Xử lý khi có tin nhắn từ xe gửi lên Web ---
       client.on("message", function (topic, message) {
+        // 1. Xử lý Cảnh báo
         if (topic === topic_warn) {
           let msgStr = message.toString();
           let warnBox = document.getElementById("warningBox");
-
           warnBox.innerText = msgStr;
-
-          // Đổi màu box tùy theo nội dung cảnh báo
-          if (msgStr.includes("CẢNH BÁO")) {
-            warnBox.className = "alert-danger"; // Chuyển nền đỏ
-          } else if (msgStr.includes("AN TOÀN")) {
-            warnBox.className = "alert-safe"; // Chuyển nền xanh
-          }
-        }
-        // --- THÊM MỚI ODOMETRY: Tách chuỗi hiển thị tốc độ ---
+          if (msgStr.includes("CẢNH BÁO")) warnBox.className = "alert-danger"; 
+          else if (msgStr.includes("AN TOÀN")) warnBox.className = "alert-safe"; 
+        } 
+        
+        // 2. Xử lý Tốc độ & Bản đồ
         else if (topic === topic_telemetry) {
-          let data = message.toString().split("|"); // Tách bằng ký tự "|"
+          let data = message.toString().split("|"); 
           if (data.length === 2) {
-            document.getElementById("telemetryBox").innerHTML =
-              "Vận tốc: " +
-              data[0] +
-              " cm/s <br> Quãng đường đi: " +
-              data[1] +
-              " cm";
+            document.getElementById("telemetryBox").innerHTML = "Vận tốc: " + data[0] + " cm/s <br> Quãng đường đi: " + data[1] + " cm";
+            
+            // --- LOGIC VẼ LỘ TRÌNH (Chỉ tiến/lùi, không vẽ khi rẽ) ---
+            let newDist = parseFloat(data[1]);
+            currentTotalDistance = newDist;
+            
+            if (lastDistance === -1) lastDistance = newDist; // Khởi tạo lần đầu
+            
+            let deltaDist = newDist - lastDistance;
+            lastDistance = newDist;
+
+            // Chỉ cập nhật điểm mới trên bản đồ nếu đang bấm Tiến(F) hoặc Lùi(B)
+            if (deltaDist > 0 && (currentCommand === 'F' || currentCommand === 'B')) {
+              let directionMultiplier = (currentCommand === 'B') ? -1 : 1;
+              
+              // Đổi góc độ sang radian (Trừ đi 90 độ vì trong Canvas, 0 radian là hướng Đông, ta cần 0 độ là hướng Bắc)
+              let rad = (angleDeg - 90) * Math.PI / 180; 
+              
+              // Tính tọa độ mới (Sin/Cos)
+              posX += (deltaDist * Math.cos(rad) * PIXELS_PER_CM) * directionMultiplier;
+              posY += (deltaDist * Math.sin(rad) * PIXELS_PER_CM) * directionMultiplier;
+              
+              path.push({x: posX, y: posY}); // Lưu tọa độ
+            }
           }
         }
       });
-      // ---------------------------------------------------------
 
       function sendCommand(cmd) {
         if (client.connected) {
           client.publish(topic_control, cmd);
         }
+        
+        currentCommand = cmd;
+        
+        // Xác định chiều quay cho vòng lặp Animation
+        if (cmd === 'L') isTurning = -1;
+        else if (cmd === 'R') isTurning = 1;
+        else isTurning = 0;
       }
+
+      function resetMap() {
+        posX = 175;
+        posY = 150;
+        angleDeg = 0;
+        path = [{x: posX, y: posY}];
+        lastDistance = currentTotalDistance; // Cập nhật lại mốc để tránh nhảy nét vẽ
+      }
+
+      // --- VÒNG LẶP RENDER ĐỒ HỌA 60FPS ---
+      function renderLoop() {
+        let now = Date.now();
+        let dt = (now - lastTime) / 1000.0; // Khoảng thời gian (giây)
+        lastTime = now;
+
+        // 1. Tính toán góc quay thời gian thực
+        if (isTurning !== 0) {
+          angleDeg += isTurning * TURN_SPEED_DEG_PER_SEC * dt;
+        }
+
+        // 2. Vẽ ra Canvas
+        let canvas = document.getElementById("mapCanvas");
+        if (canvas) {
+          let ctx = canvas.getContext("2d");
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // Vẽ lưới nền (Radar Grid)
+          ctx.strokeStyle = "#222";
+          ctx.lineWidth = 1;
+          for (let i = 0; i < canvas.width; i += 25) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+          for (let i = 0; i < canvas.height; i += 25) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke(); }
+
+          // Vẽ lộ trình đã đi (Vệt màu xanh lá)
+          if (path.length > 0) {
+            ctx.strokeStyle = "#4caf50";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+              ctx.lineTo(path[i].x, path[i].y);
+            }
+            ctx.stroke();
+          }
+
+          // Vẽ Xe (Biểu tượng mũi tên Đỏ hướng theo góc Angle)
+          ctx.save();
+          ctx.translate(posX, posY);
+          ctx.rotate(angleDeg * Math.PI / 180);
+          
+          ctx.fillStyle = "#ff4c4c";
+          ctx.beginPath();
+          ctx.moveTo(0, -12); // Đầu mũi tên chỉ lên
+          ctx.lineTo(-8, 8);  // Đuôi trái
+          ctx.lineTo(0, 4);   // Lõm ở giữa đuôi
+          ctx.lineTo(8, 8);   // Đuôi phải
+          ctx.closePath();
+          ctx.fill();
+          
+          ctx.restore();
+        }
+
+        // Gọi lại vòng lặp ở khung hình tiếp theo
+        requestAnimationFrame(renderLoop);
+      }
+
+      // Kích hoạt đồ họa khi tải xong trang web
+      window.onload = function() {
+        requestAnimationFrame(renderLoop);
+      };
     </script>
   </head>
   <body>
-    <h2>ĐIỀU KHIỂN XE MQTT</h2>
+    <h2>🚀 BẢNG ĐIỀU KHIỂN AIoT</h2>
     <div id="status">Đang kết nối Server...</div>
-
-    <!-- --- THÊM MỚI: Khung hiển thị cảnh báo (Siêu âm) --- -->
+    
+    <!-- Khung hiển thị cảnh báo (Siêu âm) -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
-    <!-- ----------------------------------------- -->
 
-    <!-- --- THÊM MỚI ODOMETRY: Khung hiển thị Vận tốc (Encoder) --- -->
-    <div id="telemetryBox">
-      Vận tốc: 0 cm/s <br />
-      Quãng đường đi: 0 cm
+    <!-- Khung hiển thị Vận tốc (Encoder) -->
+    <div id="telemetryBox">Vận tốc: 0 cm/s <br> Quãng đường đi: 0 cm</div>
+
+    <!-- --- THÊM MỚI: BẢN ĐỒ RADAR LỘ TRÌNH --- -->
+    <div class="map-container">
+      <canvas id="mapCanvas" width="350" height="300"></canvas>
+      <button class="btn-reset" onclick="resetMap()">🔄 Reset Lộ Trình</button>
     </div>
-    <!-- ------------------------------------------------- -->
+    <!-- --------------------------------------- -->
 
+    <!-- Nút điều khiển -->
     <div class="grid">
       <div class="empty"></div>
       <button
