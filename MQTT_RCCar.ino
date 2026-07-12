@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-const char* ssid = "Bong Hong Vang";
-const char* password = "12344321";
+const char* ssid = "TP-Link_6475";
+const char* password = "34954928";
 
 const char* mqtt_server = "broker.emqx.io";
 const int mqtt_port = 1883;
@@ -18,6 +18,16 @@ int IN1 = 22;
 int IN2 = 21;
 int IN3 = 19;
 int IN4 = 18;
+
+// --- ĐOẠN THÊM MỚI SỐ 1: Khai báo cảm biến siêu âm ---
+const int TRIG_PIN = 25;
+const int ECHO_PIN = 26;
+
+const char* mqtt_topic_warn = "hust/iot/rccar/warning_v1"; // Topic gửi cảnh báo
+
+bool isBlocked = false;            // Cờ đánh dấu xe đang bị chặn
+unsigned long lastMeasureTime = 0; // Bộ đếm thời gian đo khoảng cách
+// -----------------------------------------------------
 
 // Điều khiển động cơ
 void forward() {
@@ -50,13 +60,38 @@ void stopCar() {
   digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
 }
 
+// --- ĐOẠN THÊM MỚI SỐ 2: Hàm tính khoảng cách ---
+float getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); 
+  if (duration == 0) return 999.0; // Không nhận được tín hiệu
+  
+  return duration * 0.034 / 2;     // Trả về khoảng cách (cm)
+}
+// -----------------------------------------------
+
 void setup_wifi() {
   delay(10);
+  Serial.println();
+  Serial.print("Đang kết nối vào WiFi: ");
+  Serial.println(ssid);
+
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
   }
+  
+  Serial.println("");
+  Serial.println("Đã kết nối WiFi thành công!");
+  Serial.print("Địa chỉ IP của xe: ");
+  Serial.println(WiFi.localIP());
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -65,7 +100,19 @@ void callback(char* topic, byte* payload, unsigned int length) {
     messageTemp += (char)payload[i];
   }
 
-  if (messageTemp == "F") forward();
+  // Báo ra màn hình để biết xe đã nhận được lệnh
+  Serial.print("Tín hiệu nhận được từ Web: ");
+  Serial.println(messageTemp);
+
+  // --- ĐOẠN THÊM MỚI SỐ 3: Kiểm tra điều kiện an toàn ---
+  if (messageTemp == "F") {
+    if (!isBlocked) {
+      forward();
+    } else {
+      Serial.println("Từ chối lệnh TIẾN: Phía trước có vật cản!");
+    }
+  }
+  // ------------------------------------------------------
   else if (messageTemp == "B") backward();
   else if (messageTemp == "L") left();
   else if (messageTemp == "R") right();
@@ -74,19 +121,33 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   while (!client.connected()) {
+    Serial.print("Đang kết nối tới MQTT Broker... ");
     String clientId = "ESP32Client-";
     clientId += String(random(0xffff), HEX);
     
     if (client.connect(clientId.c_str())) {     
+      Serial.println("Thành công!");
       client.subscribe(mqtt_topic);
     } else {     
+      Serial.print("Thất bại, mã lỗi (state): ");
       Serial.print(client.state());
+      Serial.println(" -> Thử lại sau 5 giây");
       delay(5000);
     }
   }
 }
 
 void setup() {
+  // KHỞI TẠO SERIAL (Cực kỳ quan trọng để debug)
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("Bắt đầu khởi động hệ thống xe MQTT...");
+
+  // --- ĐOẠN THÊM MỚI SỐ 4: Thiết lập chân cảm biến ---
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  // ---------------------------------------------------
+
   pinMode(enA, OUTPUT); pinMode(enB, OUTPUT);
   pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
@@ -106,4 +167,29 @@ void loop() {
     reconnect();
   }
   client.loop();
+  // --- ĐOẠN THÊM MỚI SỐ 5: Quét vật cản tự động (chu kỳ 100ms) ---
+  if (millis() - lastMeasureTime > 100) {
+    lastMeasureTime = millis();
+    float distance = getDistance();
+
+    if (distance > 0 && distance <= 40.0) { // Khoảng cách nhỏ hơn 40cm
+      if (!isBlocked) {
+        stopCar(); // Tự động phanh lập tức
+        isBlocked = true;
+        String warnMsg = "CẢNH BÁO: Phát hiện vật cản! Khoảng cách: " + String(distance) + " cm";
+        client.publish(mqtt_topic_warn, warnMsg.c_str());
+        Serial.print("CẢNH BÁO: Đã phanh xe! Khoảng cách đo được: ");
+        Serial.print(distance);
+        Serial.println(" cm");
+      }
+    } else {
+      if (isBlocked) { // Đã hết vật cản
+        isBlocked = false;
+        String safeMsg = "AN TOÀN: Hết vật cản. Khoảng cách: " + String(distance) + " cm";
+        client.publish(mqtt_topic_warn, safeMsg.c_str());
+        Serial.println("AN TOÀN: Hết vật cản, mở khóa điều khiển.");
+      }
+    }
+  }
+  // --------------------------------------------------------------
 }
