@@ -42,6 +42,16 @@ float totalDistance = 0.0;             // Tổng quãng đường (cm)
 unsigned long lastOdoTime = 0;         // Bộ đếm thời gian đo tốc độ
 // --------------------------------------------
 
+// --- ĐOẠN THÊM MỚI LINE FOLLOWER SỐ 1: Khai báo 5 mắt cảm biến ---
+const int IR_1 = 34; // Mắt 1: Trái ngoài cùng
+const int IR_2 = 35; // Mắt 2: Trái bên trong
+const int IR_3 = 32; // Mắt 3: Chính giữa
+const int IR_4 = 33; // Mắt 4: Phải bên trong
+const int IR_5 = 14; // Mắt 5: Phải ngoài cùng
+
+bool isLineFollowerMode = false; // Cờ theo dõi chế độ Tự động / Bằng tay
+// -----------------------------------------------------------------
+
 // Điều khiển động cơ
 void forward() {
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
@@ -123,19 +133,28 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Tín hiệu nhận được từ Web: ");
   Serial.println(messageTemp);
 
-  // --- ĐOẠN THÊM MỚI SỐ 3: Kiểm tra điều kiện an toàn ---
-  if (messageTemp == "F") {
-    if (!isBlocked) {
-      forward();
-    } else {
-      Serial.println("Từ chối lệnh TIẾN: Phía trước có vật cản!");
-    }
+  // --- ĐOẠN SỬA ĐỔI LINE FOLLOWER SỐ 2: Tích hợp chọn chế độ ---
+  if (messageTemp == "AUTO") {
+    isLineFollowerMode = true;
+    Speed = 130; // Chạy chậm để bám vạch chính xác
+    Serial.println("Chế độ: TỰ ĐỘNG BÁM VẠCH");
+  } 
+  else if (messageTemp == "MANUAL") {
+    isLineFollowerMode = false;
+    Speed = 255; // Trả lại tốc độ tối đa
+    stopCar();
+    Serial.println("Chế độ: ĐIỀU KHIỂN BẰNG TAY");
   }
-  // ------------------------------------------------------
-  else if (messageTemp == "B") backward();
-  else if (messageTemp == "L") left();
-  else if (messageTemp == "R") right();
-  else if (messageTemp == "S") stopCar();
+  else if (messageTemp == "F") {
+    isLineFollowerMode = false; Speed = 255; // Tự thoát Auto khi bấm tay
+    if (!isBlocked) forward();
+    else Serial.println("Từ chối lệnh TIẾN: Phía trước có vật cản!");
+  }
+  else if (messageTemp == "B") { isLineFollowerMode = false; Speed = 255; backward(); }
+  else if (messageTemp == "L") { isLineFollowerMode = false; Speed = 255; left(); }
+  else if (messageTemp == "R") { isLineFollowerMode = false; Speed = 255; right(); }
+  else if (messageTemp == "S") { stopCar(); }
+  // -----------------------------------------------------------
 }
 
 void reconnect() {
@@ -171,6 +190,14 @@ void setup() {
   pinMode(ENCODER_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, FALLING);
   // ---------------------------------------------
+
+  // --- ĐOẠN THÊM MỚI LINE FOLLOWER SỐ 3: Khởi tạo chân 5 cảm biến ---
+  pinMode(IR_1, INPUT);
+  pinMode(IR_2, INPUT);
+  pinMode(IR_3, INPUT);
+  pinMode(IR_4, INPUT);
+  pinMode(IR_5, INPUT);
+  // ------------------------------------------------------------------
 
   pinMode(enA, OUTPUT); pinMode(enB, OUTPUT);
   pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
@@ -241,5 +268,32 @@ void loop() {
     Serial.print(" cm/s | Quãng đường: "); Serial.print(totalDistance); Serial.println(" cm");
   }
   // -------------------------------------------------------------------------
+
+  // --- ĐOẠN THÊM MỚI LINE FOLLOWER SỐ 4: Thuật toán dò vạch 5 mắt ---
+  if (isLineFollowerMode && !isBlocked) {
+    int s1 = digitalRead(IR_1); 
+    int s2 = digitalRead(IR_2); 
+    int s3 = digitalRead(IR_3); 
+    int s4 = digitalRead(IR_4); 
+    int s5 = digitalRead(IR_5); 
+
+    // Logic bẻ lái: 1 là vạch đen, 0 là nền trắng
+    if (s3 == 1) {
+      Speed = 130; forward(); // Xe ở giữa -> Đi thẳng
+    } else if (s2 == 1) {
+      Speed = 130; left();    // Lệch phải -> Vạch ở bên trái -> Rẽ trái
+    } else if (s4 == 1) {
+      Speed = 130; right();   // Lệch trái -> Vạch ở bên phải -> Rẽ phải
+    } else if (s1 == 1) {
+      Speed = 160; left();    // Lệch cực phải -> Rẽ gắt trái
+    } else if (s5 == 1) {
+      Speed = 160; right();   // Lệch cực trái -> Rẽ gắt phải
+    } else if (s1 == 0 && s2 == 0 && s3 == 0 && s4 == 0 && s5 == 0) {
+      stopCar();              // Trắng tinh -> Mất vạch -> Phanh
+    }
+  } else if (isLineFollowerMode && isBlocked) {
+    stopCar(); // Đang bám vạch mà gặp vật cản thì phanh lại
+  }
+  // ------------------------------------------------------------------
 
 }
