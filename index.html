@@ -269,6 +269,10 @@
         }
       }
 
+      function lockCar() {
+        if (client.connected) client.publish(topic_control, "LOCK");
+      }
+
       function sendCommand(cmd) {
         if (client.connected) client.publish(topic_control, cmd);
         currentCommand = cmd;
@@ -363,6 +367,19 @@
         🤖 Bám vạch
       </button>
     </div>
+
+    <!-- --- THÊM MỚI: Nút Khóa xe thủ công --- -->
+    <div class="mode-panel">
+      <button
+        class="btn-mode"
+        id="btnLock"
+        style="background-color: #e53935; width: 100%"
+        onclick="lockCar()"
+      >
+        🔒 Khóa xe
+      </button>
+    </div>
+    <!-- --------------------------------------- -->
 
     <!-- Khung hiển thị cảnh báo (Siêu âm / RFID lỗi) -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
