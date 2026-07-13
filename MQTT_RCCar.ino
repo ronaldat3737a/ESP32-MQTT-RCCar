@@ -1,6 +1,14 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
+// --- ĐOẠN THÊM MỚI RFID SỐ 1: Thư viện và chân RC522 ---
+#include <SPI.h>
+#include <MFRC522.h>
+#define RST_PIN 2
+#define SS_PIN 15
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+// ------------------------------------------------------
+
 const char* ssid = "TP-Link_6475";
 const char* password = "34954928";
 
@@ -51,6 +59,11 @@ const int IR_5 = 14; // Mắt 5: Phải ngoài cùng
 
 bool isLineFollowerMode = false; // Cờ theo dõi chế độ Tự động / Bằng tay
 // -----------------------------------------------------------------
+
+// --- ĐOẠN THÊM MỚI RFID SỐ 2: Hệ thống Chìa Khóa ---
+bool isLocked = true; // Mặc định xe BỊ KHÓA khi mới bật nguồn
+String AUTHORIZED_UID = "CHUA BIET"; // Lát nữa bạn sẽ thay mã thẻ thật vào chữ CHUA BIET này
+// --------------------------------------------------
 
 // Điều khiển động cơ
 void forward() {
@@ -133,6 +146,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Tín hiệu nhận được từ Web: ");
   Serial.println(messageTemp);
 
+  // --- ĐOẠN THÊM MỚI RFID SỐ 3: Chặn lệnh nếu xe chưa mở khóa ---
+  if (isLocked) {
+    Serial.println("TỪ CHỐI: Xe đang bị khóa! Vui lòng quẹt thẻ từ.");
+    client.publish(mqtt_topic_warn, "CẢNH BÁO: Xe đang bị khóa! Quẹt thẻ để mở.");
+    return; // Lệnh return này sẽ thoát ngay lập tức, vô hiệu hóa các nút điều khiển phía dưới
+  }
+  // --------------------------------------------------------------
+
   // --- ĐOẠN SỬA ĐỔI LINE FOLLOWER SỐ 2: Tích hợp chọn chế độ ---
   if (messageTemp == "AUTO") {
     isLineFollowerMode = true;
@@ -181,6 +202,12 @@ void setup() {
   delay(100);
   Serial.println("Bắt đầu khởi động hệ thống xe MQTT...");
 
+  // --- ĐOẠN THÊM MỚI RFID SỐ 4: Khởi động SPI và RC522 ---
+  SPI.begin(4, 12, 13, 15); // Khởi tạo SPI Custom (SCK, MISO, MOSI, SS)
+  mfrc522.PCD_Init();
+  Serial.println("Đã khởi tạo RC522. Hãy quẹt thẻ để lấy mã!");
+  // -------------------------------------------------------
+
   // --- ĐOẠN THÊM MỚI SỐ 4: Thiết lập chân cảm biến ---
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
@@ -218,6 +245,34 @@ void loop() {
     reconnect();
   }
   client.loop();
+
+  // --- ĐOẠN THÊM MỚI RFID SỐ 5: Quét thẻ liên tục ---
+  if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+    String uidString = "";
+    for (byte i = 0; i < mfrc522.uid.size; i++) {
+      uidString += String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+      uidString += String(mfrc522.uid.uidByte[i], HEX);
+    }
+    uidString.trim();
+    uidString.toUpperCase(); // In hoa chữ cái mã thẻ
+
+    Serial.print("Đã quẹt thẻ! Mã UID là: ");
+    Serial.println(uidString);
+
+    if (uidString == AUTHORIZED_UID) {
+      isLocked = false; // MỞ KHÓA
+      Serial.println("-> MÃ HỢP LỆ! XE ĐÃ ĐƯỢC MỞ KHÓA.");
+      client.publish(mqtt_topic_warn, "AN TOÀN: Đã mở khóa xe thành công!");
+    } else {
+      Serial.println("-> SAI THẺ! Truy cập bị từ chối.");
+      // Gửi mã thẻ lên khung cảnh báo của Web để bạn copy
+      String msg = "CẢNH BÁO: Thẻ sai! Mã thẻ của bạn là: " + uidString;
+      client.publish(mqtt_topic_warn, msg.c_str());
+    }
+    mfrc522.PICC_HaltA(); // Tạm dừng đọc để không bị spam tin nhắn
+  }
+  // --------------------------------------------------
+
   // --- ĐOẠN THÊM MỚI SỐ 5: Quét vật cản tự động (chu kỳ 100ms) ---
   if (millis() - lastMeasureTime > 100) {
     lastMeasureTime = millis();

@@ -18,7 +18,21 @@
         color: white;
       }
 
-      /* --- THÊM MỚI LINE FOLLOWER: CSS Menu Chọn Chế Độ --- */
+      /* --- THÊM MỚI RFID: CSS cho trạng thái Khóa --- */
+      #lockStatus {
+        margin: 10px auto;
+        padding: 12px;
+        border-radius: 8px;
+        max-width: 350px;
+        font-weight: bold;
+        font-size: 18px;
+        color: white;
+        border: 2px solid #555;
+        transition: 0.3s;
+      }
+      /* ---------------------------------------------- */
+
+      /* --- CSS Menu Chọn Chế Độ --- */
       .mode-panel {
         background-color: #333;
         padding: 10px;
@@ -40,11 +54,10 @@
       }
       #btnManual {
         background-color: #2196f3;
-      } /* Mặc định sáng màu xanh dương */
+      }
       #btnAuto {
         background-color: #555;
       }
-      /* ---------------------------------------------------- */
 
       /* --- Khung cảnh báo (Siêu âm) --- */
       #warningBox {
@@ -162,25 +175,22 @@
 
       const client = mqtt.connect(broker);
 
-      // --- BIẾN TOÀN CỤC CHO BẢN ĐỒ 2D ---
+      // BIẾN TOÀN CỤC BẢN ĐỒ
       let currentCommand = "S";
-      let posX = 175;
-      let posY = 150;
-      let angleDeg = 0;
+      let posX = 175,
+        posY = 150,
+        angleDeg = 0;
       let path = [{ x: posX, y: posY }];
-
-      let isTurning = 0;
-      let lastTime = Date.now();
-      let lastDistance = -1;
-      let currentTotalDistance = 0;
-
-      const TURN_SPEED_DEG_PER_SEC = 90;
-      const PIXELS_PER_CM = 2.0;
+      let isTurning = 0,
+        lastTime = Date.now(),
+        lastDistance = -1,
+        currentTotalDistance = 0;
+      const TURN_SPEED_DEG_PER_SEC = 90,
+        PIXELS_PER_CM = 2.0;
 
       client.on("connect", function () {
         document.getElementById("status").innerText = "Đã kết nối Server MQTT";
         document.getElementById("status").style.color = "lightgreen";
-
         client.subscribe(topic_warn);
         client.subscribe(topic_telemetry);
       });
@@ -191,17 +201,28 @@
       });
 
       client.on("message", function (topic, message) {
-        // 1. Xử lý Cảnh báo
         if (topic === topic_warn) {
           let msgStr = message.toString();
           let warnBox = document.getElementById("warningBox");
           warnBox.innerText = msgStr;
+
           if (msgStr.includes("CẢNH BÁO")) warnBox.className = "alert-danger";
           else if (msgStr.includes("AN TOÀN")) warnBox.className = "alert-safe";
-        }
 
-        // 2. Xử lý Tốc độ & Bản đồ
-        else if (topic === topic_telemetry) {
+          // --- THÊM MỚI RFID: Cập nhật giao diện Ổ Khóa ---
+          let lockBox = document.getElementById("lockStatus");
+          if (msgStr.includes("Đã mở khóa")) {
+            lockBox.innerText = "🔓 XE ĐÃ MỞ KHÓA";
+            lockBox.className = "alert-safe"; // Xanh
+          } else if (
+            msgStr.includes("Xe đang bị khóa") ||
+            msgStr.includes("Thẻ sai")
+          ) {
+            lockBox.innerText = "🔒 XE ĐANG BỊ KHÓA";
+            lockBox.className = "alert-danger"; // Đỏ
+          }
+          // ------------------------------------------------
+        } else if (topic === topic_telemetry) {
           let data = message.toString().split("|");
           if (data.length === 2) {
             document.getElementById("telemetryBox").innerHTML =
@@ -211,10 +232,8 @@
               data[1] +
               " cm";
 
-            // --- LOGIC VẼ LỘ TRÌNH ---
             let newDist = parseFloat(data[1]);
             currentTotalDistance = newDist;
-
             if (lastDistance === -1) lastDistance = newDist;
 
             let deltaDist = newDist - lastDistance;
@@ -226,49 +245,38 @@
             ) {
               let directionMultiplier = currentCommand === "B" ? -1 : 1;
               let rad = ((angleDeg - 90) * Math.PI) / 180;
-
               posX +=
                 deltaDist * Math.cos(rad) * PIXELS_PER_CM * directionMultiplier;
               posY +=
                 deltaDist * Math.sin(rad) * PIXELS_PER_CM * directionMultiplier;
-
               path.push({ x: posX, y: posY });
             }
           }
         }
       });
 
-      // --- THÊM MỚI LINE FOLLOWER: Hàm đổi màu UI và gửi MQTT khi chọn chế độ ---
       function setMode(mode) {
         if (mode === "AUTO") {
-          document.getElementById("btnAuto").style.backgroundColor = "#4caf50"; // Sáng xanh lá
-          document.getElementById("btnManual").style.backgroundColor = "#555"; // Tắt
+          document.getElementById("btnAuto").style.backgroundColor = "#4caf50";
+          document.getElementById("btnManual").style.backgroundColor = "#555";
           if (client.connected) client.publish(topic_control, "AUTO");
         } else {
           document.getElementById("btnManual").style.backgroundColor =
-            "#2196F3"; // Sáng xanh dương
-          document.getElementById("btnAuto").style.backgroundColor = "#555"; // Tắt
+            "#2196F3";
+          document.getElementById("btnAuto").style.backgroundColor = "#555";
           if (client.connected && mode === "MANUAL")
             client.publish(topic_control, "MANUAL");
         }
       }
 
-      // Đã cập nhật sendCommand để tự thoát chế độ Auto khi bấm nút điều khiển tay
       function sendCommand(cmd) {
-        if (client.connected) {
-          client.publish(topic_control, cmd);
-        }
-
+        if (client.connected) client.publish(topic_control, cmd);
         currentCommand = cmd;
-
         if (cmd === "L") isTurning = -1;
         else if (cmd === "R") isTurning = 1;
         else isTurning = 0;
-
-        // Tự động chuyển UI về Bằng Tay nếu đang bấm phím điều hướng
-        if (cmd === "F" || cmd === "B" || cmd === "L" || cmd === "R") {
+        if (cmd === "F" || cmd === "B" || cmd === "L" || cmd === "R")
           setMode("MANUAL_OVERRIDE");
-        }
       }
 
       function resetMap() {
@@ -284,16 +292,14 @@
         let dt = (now - lastTime) / 1000.0;
         lastTime = now;
 
-        if (isTurning !== 0) {
+        if (isTurning !== 0)
           angleDeg += isTurning * TURN_SPEED_DEG_PER_SEC * dt;
-        }
 
         let canvas = document.getElementById("mapCanvas");
         if (canvas) {
           let ctx = canvas.getContext("2d");
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-          // Vẽ lưới nền (Radar Grid)
           ctx.strokeStyle = "#222";
           ctx.lineWidth = 1;
           for (let i = 0; i < canvas.width; i += 25) {
@@ -309,23 +315,19 @@
             ctx.stroke();
           }
 
-          // Vẽ lộ trình đã đi
           if (path.length > 0) {
             ctx.strokeStyle = "#4caf50";
             ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.moveTo(path[0].x, path[0].y);
-            for (let i = 1; i < path.length; i++) {
+            for (let i = 1; i < path.length; i++)
               ctx.lineTo(path[i].x, path[i].y);
-            }
             ctx.stroke();
           }
 
-          // Vẽ Xe
           ctx.save();
           ctx.translate(posX, posY);
           ctx.rotate((angleDeg * Math.PI) / 180);
-
           ctx.fillStyle = "#ff4c4c";
           ctx.beginPath();
           ctx.moveTo(0, -12);
@@ -334,10 +336,8 @@
           ctx.lineTo(8, 8);
           ctx.closePath();
           ctx.fill();
-
           ctx.restore();
         }
-
         requestAnimationFrame(renderLoop);
       }
 
@@ -350,7 +350,11 @@
     <h2>🚀 BẢNG ĐIỀU KHIỂN AIoT</h2>
     <div id="status">Đang kết nối Server...</div>
 
-    <!-- --- Menu Chọn Chế Độ --- -->
+    <!-- --- THÊM MỚI RFID: Khung trạng thái Khóa Xe --- -->
+    <div id="lockStatus" class="alert-danger">🔒 XE ĐANG BỊ KHÓA</div>
+    <!-- ----------------------------------------------- -->
+
+    <!-- Menu Chọn Chế Độ -->
     <div class="mode-panel">
       <button class="btn-mode" id="btnManual" onclick="setMode('MANUAL')">
         🕹️ Bằng tay
@@ -360,7 +364,7 @@
       </button>
     </div>
 
-    <!-- Khung hiển thị cảnh báo (Siêu âm) -->
+    <!-- Khung hiển thị cảnh báo (Siêu âm / RFID lỗi) -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
 
     <!-- Khung hiển thị Vận tốc (Encoder) -->
@@ -388,7 +392,6 @@
         ⬆️
       </button>
       <div class="empty"></div>
-
       <button
         class="btn"
         onmousedown="sendCommand('L')"
@@ -408,7 +411,6 @@
       >
         ➡️
       </button>
-
       <div class="empty"></div>
       <button
         class="btn"
