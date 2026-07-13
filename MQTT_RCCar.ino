@@ -19,13 +19,27 @@ const char* mqtt_topic = "hust/iot/rccar/control_v1";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-int Speed = 255;
+// ===== QUẢN LÝ 4 CẤP TỐC ĐỘ =====
+int Speed = 140;       // tốc độ mặc định
+
+int speedLevel = 2;    // mức hiện tại
+
+int speedTable[5] = {
+  0,
+  90,    // Level 1
+  140,   // Level 2
+  190,   // Level 3
+  230    // Level 4
+};
+// =================================
 int enA = 5;
 int enB = 23;
 int IN1 = 22;
 int IN2 = 21;
 int IN3 = 19;
 int IN4 = 18;
+
+String currentDirection = "STOP";
 
 // --- ĐOẠN THÊM MỚI SỐ 1: Khai báo cảm biến siêu âm ---
 const int TRIG_PIN = 25;
@@ -67,34 +81,56 @@ String AUTHORIZED_UID = "1B 30 4D 06"; // Lát nữa bạn sẽ thay mã thẻ t
 
 // Điều khiển động cơ
 void forward() {
+  currentDirection="FORWARD";
+
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
 void backward() {
+  currentDirection="BACKWARD";
+
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
   digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
 }
 
 void left() {
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
 void right() {
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
 }
 
 void stopCar() {
+  currentDirection="STOP";
+
   ledcWrite(enA, 0); ledcWrite(enB, 0);
   digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
 }
+
+// ===== SET SPEED =====
+void setSpeedLevel(int level)
+{
+  if(level < 1) level = 1;
+  if(level > 4) level = 4;
+
+  speedLevel = level;
+  Speed = speedTable[level];
+
+  Serial.print("Speed Level = ");
+  Serial.print(level);
+  Serial.print(" PWM=");
+  Serial.println(Speed);
+}
+// ====================
 
 // --- ĐOẠN THÊM MỚI SỐ 2: Hàm tính khoảng cách ---
 float getDistance() {
@@ -145,6 +181,33 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Tín hiệu nhận được từ Web: ");
   Serial.println(messageTemp);
 
+  // ===== ĐIỀU KHIỂN 4 CẤP TỐC =====
+  if(messageTemp == "SPEED1")
+  {
+    setSpeedLevel(1);
+    return;
+  }
+
+  else if(messageTemp == "SPEED2")
+  {
+    setSpeedLevel(2);
+    return;
+  }
+
+  else if(messageTemp == "SPEED3")
+  {
+    setSpeedLevel(3);
+    return;
+  }
+
+  else if(messageTemp == "SPEED4")
+  {
+    setSpeedLevel(4);
+    return;
+  }
+
+  // ================================
+
   // --- ĐOẠN THÊM MỚI RFID SỐ 3b: Chủ động khóa xe qua nút Web ---
   if (messageTemp == "LOCK") {
     isLocked = true;
@@ -167,23 +230,41 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // --- ĐOẠN SỬA ĐỔI LINE FOLLOWER SỐ 2: Tích hợp chọn chế độ ---
   if (messageTemp == "AUTO") {
     isLineFollowerMode = true;
-    Speed = 130; // Chạy chậm để bám vạch chính xác
+    Speed = speedTable[1];// Chạy chậm để bám vạch chính xác
     Serial.println("Chế độ: TỰ ĐỘNG BÁM VẠCH");
   } 
   else if (messageTemp == "MANUAL") {
     isLineFollowerMode = false;
-    Speed = 255; // Trả lại tốc độ tối đa
+    setSpeedLevel(speedLevel);// Trả lại tốc độ tối đa
     stopCar();
     Serial.println("Chế độ: ĐIỀU KHIỂN BẰNG TAY");
   }
   else if (messageTemp == "F") {
-    isLineFollowerMode = false; Speed = 255; // Tự thoát Auto khi bấm tay
-    if (!isBlocked) forward();
-    else Serial.println("Từ chối lệnh TIẾN: Phía trước có vật cản!");
+      isLineFollowerMode = false;
+      // Đi tiến không bị giới hạn
+      forward();
   }
-  else if (messageTemp == "B") { isLineFollowerMode = false; Speed = 255; backward(); }
-  else if (messageTemp == "L") { isLineFollowerMode = false; Speed = 255; left(); }
-  else if (messageTemp == "R") { isLineFollowerMode = false; Speed = 255; right(); }
+  else if (messageTemp == "B") {
+      isLineFollowerMode = false;
+      // Chỉ chặn khi lùi
+      if(!isBlocked)
+      {
+          backward();
+      }
+      else
+      {
+          stopCar();
+          Serial.println("Từ chối lùi: Có vật cản phía sau!");
+      }
+  }
+  else if (messageTemp == "L") {
+      isLineFollowerMode = false;
+      left();
+  }
+  else if (messageTemp == "R") {
+      isLineFollowerMode = false;
+      right();
+  }
   else if (messageTemp == "S") { stopCar(); }
   // -----------------------------------------------------------
 }
@@ -307,24 +388,41 @@ void loop() {
     lastMeasureTime = millis();
     float distance = getDistance();
 
-    if (distance > 0 && distance <= 40.0) { // Khoảng cách nhỏ hơn 40cm
+  // Chỉ kiểm tra vật cản khi xe đang LÙI
+  if (currentDirection == "BACKWARD" 
+      && distance > 0 
+      && distance <= 40.0) {
       if (!isBlocked) {
-        stopCar(); // Tự động phanh lập tức
-        isBlocked = true;
-        String warnMsg = "CẢNH BÁO: Phát hiện vật cản! Khoảng cách: " + String(distance) + " cm";
-        client.publish(mqtt_topic_warn, warnMsg.c_str());
-        Serial.print("CẢNH BÁO: Đã phanh xe! Khoảng cách đo được: ");
-        Serial.print(distance);
-        Serial.println(" cm");
+          stopCar();
+          isBlocked = true;
+          String warnMsg = 
+          "CẢNH BÁO: Không thể lùi! Vật cản cách "
+          + String(distance) 
+          + " cm";
+          client.publish(
+              mqtt_topic_warn,
+              warnMsg.c_str()
+          );
+          Serial.print("Đã dừng khi lùi. Khoảng cách: ");
+          Serial.print(distance);
+          Serial.println(" cm");
       }
-    } else {
-      if (isBlocked) { // Đã hết vật cản
-        isBlocked = false;
-        String safeMsg = "AN TOÀN: Hết vật cản. Khoảng cách: " + String(distance) + " cm";
-        client.publish(mqtt_topic_warn, safeMsg.c_str());
-        Serial.println("AN TOÀN: Hết vật cản, mở khóa điều khiển.");
+  }
+  else {
+      if (isBlocked) {
+          isBlocked = false;
+          String safeMsg =
+          "AN TOÀN: Có thể lùi lại. Khoảng cách: "
+          + String(distance)
+          + " cm";
+          client.publish(
+              mqtt_topic_warn,
+              safeMsg.c_str()
+          );
+          Serial.println(
+          "Hết vật cản, cho phép lùi."
+          );
       }
-    }
   }
   // --------------------------------------------------------------
   // --- ĐOẠN THÊM MỚI ODOMETRY: Tính Tốc độ & Quãng đường (chu kỳ 1 giây) ---

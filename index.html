@@ -166,6 +166,65 @@
         font-weight: bold;
         color: orange;
       }
+      /* ===== SPEED CONTROL ===== */
+
+      .speed-panel {
+        background-color: #333;
+        padding: 15px;
+        border-radius: 10px;
+        max-width: 400px;
+        margin: 15px auto;
+      }
+
+      .speed-title {
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 12px;
+      }
+
+      .speed-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      .speed-btn {
+        width: 80px;
+        height: 60px;
+
+        border: none;
+        border-radius: 10px;
+
+        background-color: #555;
+        color: white;
+
+        font-size: 14px;
+        font-weight: bold;
+
+        cursor: pointer;
+      }
+
+      .speed-btn:hover {
+        background-color: #4caf50;
+      }
+
+      .speed-btn.active {
+        background-color: #ff9800;
+
+        box-shadow: 0 0 10px #ff9800;
+      }
+
+      #speedDisplay {
+        margin-top: 12px;
+
+        font-size: 16px;
+
+        color: #ffcc80;
+
+        font-weight: bold;
+      }
+
+      /* ========================= */
     </style>
     <script>
       const broker = "wss://broker.emqx.io:8084/mqtt";
@@ -175,6 +234,9 @@
 
       const client = mqtt.connect(broker);
 
+      // ===== SPEED CONTROL =====
+      let currentSpeedLevel = 2;
+      // =========================
       // BIẾN TOÀN CỤC BẢN ĐỒ
       let currentCommand = "S";
       let posX = 175,
@@ -273,6 +335,33 @@
         if (client.connected) client.publish(topic_control, "LOCK");
       }
 
+      // ===== SEND SPEED =====
+
+      function setSpeed(level) {
+        let command = "";
+        if (level == 1) command = "SPEED1";
+        else if (level == 2) command = "SPEED2";
+        else if (level == 3) command = "SPEED3";
+        else if (level == 4) command = "SPEED4";
+        if (client.connected) {
+          client.publish(topic_control, command);
+        }
+        currentSpeedLevel = level;
+        updateSpeedUI(level);
+      }
+      // Cập nhật giao diện
+      function updateSpeedUI(level) {
+        let buttons = document.querySelectorAll(".speed-btn");
+        buttons.forEach(function (btn) {
+          btn.classList.remove("active");
+        });
+        document.getElementById("speed" + level).classList.add("active");
+        let pwm = ["", "90", "140", "190", "230"][level];
+        document.getElementById("speedDisplay").innerHTML =
+          "Đang chọn: Mức " + level + " - PWM " + pwm;
+      }
+      // =========================
+
       function sendCommand(cmd) {
         if (client.connected) client.publish(topic_control, cmd);
         currentCommand = cmd;
@@ -280,7 +369,7 @@
         else if (cmd === "R") isTurning = 1;
         else isTurning = 0;
         if (cmd === "F" || cmd === "B" || cmd === "L" || cmd === "R")
-          setMode("MANUAL_OVERRIDE");
+          setMode("MANUAL");
       }
 
       function resetMap() {
@@ -381,6 +470,36 @@
     </div>
     <!-- --------------------------------------- -->
 
+    <!-- ===== SPEED CONTROL ===== -->
+
+    <div class="speed-panel">
+      <div class="speed-title">⚡ Điều chỉnh tốc độ</div>
+
+      <div class="speed-buttons">
+        <button class="speed-btn" id="speed1" onclick="setSpeed(1)">
+          🐢<br />
+          Mức 1
+        </button>
+
+        <button class="speed-btn active" id="speed2" onclick="setSpeed(2)">
+          🚗<br />
+          Mức 2
+        </button>
+
+        <button class="speed-btn" id="speed3" onclick="setSpeed(3)">
+          🏎<br />
+          Mức 3
+        </button>
+
+        <button class="speed-btn" id="speed4" onclick="setSpeed(4)">
+          🚀<br />
+          Mức 4
+        </button>
+      </div>
+
+      <div id="speedDisplay">Đang chọn: Mức 2 - PWM 140</div>
+    </div>
+    <!-- ======================== -->
     <!-- Khung hiển thị cảnh báo (Siêu âm / RFID lỗi) -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
 
