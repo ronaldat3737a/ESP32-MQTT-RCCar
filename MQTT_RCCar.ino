@@ -9,8 +9,8 @@
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 // ------------------------------------------------------
 
-const char* ssid = "TP-Link_6475";
-const char* password = "34954928";
+const char* ssid = "Tt";
+const char* password = "abcdefgh";
 
 const char* mqtt_server = "broker.emqx.io";
 const int mqtt_port = 1883;
@@ -84,36 +84,44 @@ void forward() {
   currentDirection="FORWARD";
 
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
 }
 
 void backward() {
   currentDirection="BACKWARD";
 
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
-}
-
-void left() {
-  ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
-void right() {
+void left() {
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
 }
 
-void stopCar() {
-  currentDirection="STOP";
+void right() {
+  ledcWrite(enA, Speed); ledcWrite(enB, Speed);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
 
-  ledcWrite(enA, 0); ledcWrite(enB, 0);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+void stopCar() {
+
+  Serial.println("==== STOP CAR ====");
+
+  currentDirection = "STOP";
+
+  ledcWrite(enA,0);
+  ledcWrite(enB,0);
+
+  digitalWrite(IN1,LOW);
+  digitalWrite(IN2,LOW);
+
+  digitalWrite(IN3,LOW);
+  digitalWrite(IN4,LOW);
 }
 
 // ===== SET SPEED =====
@@ -123,8 +131,7 @@ void setSpeedLevel(int level)
   if(level > 4) level = 4;
 
   speedLevel = level;
-  Speed = speedTable[level];
-
+  Speed = speedTable[level]; // ti mở ra
   Serial.print("Speed Level = ");
   Serial.print(level);
   Serial.print(" PWM=");
@@ -236,7 +243,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   else if (messageTemp == "MANUAL") {
     isLineFollowerMode = false;
     setSpeedLevel(speedLevel);// Trả lại tốc độ tối đa
-    stopCar();
+
     Serial.println("Chế độ: ĐIỀU KHIỂN BẰNG TAY");
   }
   else if (messageTemp == "F") {
@@ -424,6 +431,8 @@ void loop() {
           );
       }
   }
+  }
+
   // --------------------------------------------------------------
   // --- ĐOẠN THÊM MỚI ODOMETRY: Tính Tốc độ & Quãng đường (chu kỳ 1 giây) ---
   if (millis() - lastOdoTime > 1000) {
@@ -461,15 +470,15 @@ void loop() {
 
     // Logic bẻ lái: 1 là vạch đen, 0 là nền trắng
     if (s3 == 1) {
-      Speed = 130; forward(); // Xe ở giữa -> Đi thẳng
+      Speed = speedTable[1]; forward(); // Xe ở giữa -> Đi thẳng
     } else if (s2 == 1) {
-      Speed = 130; left();    // Lệch phải -> Vạch ở bên trái -> Rẽ trái
+      Speed = speedTable[1]; left();    // Lệch phải -> Vạch ở bên trái -> Rẽ trái
     } else if (s4 == 1) {
-      Speed = 130; right();   // Lệch trái -> Vạch ở bên phải -> Rẽ phải
+      Speed = speedTable[1]; right();   // Lệch trái -> Vạch ở bên phải -> Rẽ phải
     } else if (s1 == 1) {
-      Speed = 160; left();    // Lệch cực phải -> Rẽ gắt trái
+      Speed = speedTable[2]; left();    // Lệch cực phải -> Rẽ gắt trái
     } else if (s5 == 1) {
-      Speed = 160; right();   // Lệch cực trái -> Rẽ gắt phải
+      Speed = speedTable[2]; right();   // Lệch cực trái -> Rẽ gắt phải
     } else if (s1 == 0 && s2 == 0 && s3 == 0 && s4 == 0 && s5 == 0) {
       stopCar();              // Trắng tinh -> Mất vạch -> Phanh
     }
@@ -477,5 +486,4 @@ void loop() {
     stopCar(); // Đang bám vạch mà gặp vật cản thì phanh lại
   }
   // ------------------------------------------------------------------
-
 }
