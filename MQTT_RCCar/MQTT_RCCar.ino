@@ -1,3 +1,4 @@
+
 #include <WiFi.h>
 #include <PubSubClient.h>
 
@@ -9,8 +10,8 @@
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 // ------------------------------------------------------
 
-const char* ssid = "Tt";
-const char* password = "abcdefgh";
+const char* ssid = "Trung 5G";
+const char* password = "phuongthao294";
 
 const char* mqtt_server = "broker.emqx.io";
 const int mqtt_port = 1883;
@@ -19,27 +20,14 @@ const char* mqtt_topic = "hust/iot/rccar/control_v1";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-// ===== QUẢN LÝ 4 CẤP TỐC ĐỘ =====
-int Speed = 140;       // tốc độ mặc định
-
-int speedLevel = 2;    // mức hiện tại
-
-int speedTable[5] = {
-  0,
-  90,    // Level 1
-  140,   // Level 2
-  190,   // Level 3
-  230    // Level 4
-};
-// =================================
+int Speed = 220; // Tốc độ khởi tạo (tăng lên 220 để thắng ma sát do pin yếu)
 int enA = 5;
 int enB = 23;
 int IN1 = 22;
 int IN2 = 21;
 int IN3 = 19;
 int IN4 = 18;
-
-String currentDirection = "STOP";
+String currentDirection = "STOP"; // Lưu hướng di chuyển hiện tại
 
 // --- ĐOẠN THÊM MỚI SỐ 1: Khai báo cảm biến siêu âm ---
 const int TRIG_PIN = 25;
@@ -47,7 +35,6 @@ const int ECHO_PIN = 26;
 
 const char* mqtt_topic_warn = "hust/iot/rccar/warning_v1"; // Topic gửi cảnh báo
 
-bool isBlocked = false;            // Cờ đánh dấu xe đang bị chặn
 unsigned long lastMeasureTime = 0; // Bộ đếm thời gian đo khoảng cách
 // -----------------------------------------------------
 
@@ -72,6 +59,7 @@ const int IR_4 = 33; // Mắt 4: Phải bên trong
 const int IR_5 = 14; // Mắt 5: Phải ngoài cùng
 
 bool isLineFollowerMode = false; // Cờ theo dõi chế độ Tự động / Bằng tay
+bool obstacleWarned = false;     // Cờ báo hiệu có vật cản phía trước
 // -----------------------------------------------------------------
 
 // --- ĐOẠN THÊM MỚI RFID SỐ 2: Hệ thống Chìa Khóa ---
@@ -81,63 +69,39 @@ String AUTHORIZED_UID = "1B 30 4D 06"; // Lát nữa bạn sẽ thay mã thẻ t
 
 // Điều khiển động cơ
 void forward() {
-  currentDirection="FORWARD";
-
+  currentDirection = "FORWARD";
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
 void backward() {
-  currentDirection="BACKWARD";
-
+  currentDirection = "BACKWARD";
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-}
-
-void left() {
-  ledcWrite(enA, Speed); ledcWrite(enB, Speed);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
 }
 
-void right() {
+void left() {
+  currentDirection = "LEFT";
   ledcWrite(enA, Speed); ledcWrite(enB, Speed);
   digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
+void right() {
+  currentDirection = "RIGHT";
+  ledcWrite(enA, Speed); ledcWrite(enB, Speed);
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
 void stopCar() {
-
-  Serial.println("==== STOP CAR ====");
-
   currentDirection = "STOP";
-
-  ledcWrite(enA,0);
-  ledcWrite(enB,0);
-
-  digitalWrite(IN1,LOW);
-  digitalWrite(IN2,LOW);
-
-  digitalWrite(IN3,LOW);
-  digitalWrite(IN4,LOW);
+  ledcWrite(enA, 0); ledcWrite(enB, 0);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
 }
-
-// ===== SET SPEED =====
-void setSpeedLevel(int level)
-{
-  if(level < 1) level = 1;
-  if(level > 4) level = 4;
-
-  speedLevel = level;
-  Speed = speedTable[level]; // ti mở ra
-  Serial.print("Speed Level = ");
-  Serial.print(level);
-  Serial.print(" PWM=");
-  Serial.println(Speed);
-}
-// ====================
 
 // --- ĐOẠN THÊM MỚI SỐ 2: Hàm tính khoảng cách ---
 float getDistance() {
@@ -156,7 +120,13 @@ float getDistance() {
 
 // --- ĐOẠN THÊM MỚI ODOMETRY: Hàm ngắt đếm xung ---
 void IRAM_ATTR countPulse() {
-  pulseCount++;
+  static unsigned long last_micros = 0;
+  unsigned long current_micros = micros();
+  // Bỏ qua các xung nhiễu quá gần nhau (nhỏ hơn 2ms)
+  if (current_micros - last_micros > 2000) { 
+    pulseCount++;
+    last_micros = current_micros;
+  }
 }
 // -------------------------------------------------
 
@@ -188,33 +158,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Tín hiệu nhận được từ Web: ");
   Serial.println(messageTemp);
 
-  // ===== ĐIỀU KHIỂN 4 CẤP TỐC =====
-  if(messageTemp == "SPEED1")
-  {
-    setSpeedLevel(1);
-    return;
-  }
-
-  else if(messageTemp == "SPEED2")
-  {
-    setSpeedLevel(2);
-    return;
-  }
-
-  else if(messageTemp == "SPEED3")
-  {
-    setSpeedLevel(3);
-    return;
-  }
-
-  else if(messageTemp == "SPEED4")
-  {
-    setSpeedLevel(4);
-    return;
-  }
-
-  // ================================
-
   // --- ĐOẠN THÊM MỚI RFID SỐ 3b: Chủ động khóa xe qua nút Web ---
   if (messageTemp == "LOCK") {
     isLocked = true;
@@ -237,41 +180,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // --- ĐOẠN SỬA ĐỔI LINE FOLLOWER SỐ 2: Tích hợp chọn chế độ ---
   if (messageTemp == "AUTO") {
     isLineFollowerMode = true;
-    Speed = speedTable[1];// Chạy chậm để bám vạch chính xác
+    Speed = 150; // Tốc độ bám vạch (đã giảm xuống chậm hơn)
     Serial.println("Chế độ: TỰ ĐỘNG BÁM VẠCH");
   } 
   else if (messageTemp == "MANUAL") {
     isLineFollowerMode = false;
-    setSpeedLevel(speedLevel);// Trả lại tốc độ tối đa
-
+    Speed = 220; // Trả lại tốc độ mặc định
+    stopCar();
     Serial.println("Chế độ: ĐIỀU KHIỂN BẰNG TAY");
   }
-  else if (messageTemp == "F") {
-      isLineFollowerMode = false;
-      // Đi tiến không bị giới hạn
-      forward();
+  else if (messageTemp == "F") { isLineFollowerMode = false; Speed = 220; forward(); }
+  else if (messageTemp == "B") { 
+    if (obstacleWarned) stopCar(); 
+    else { isLineFollowerMode = false; Speed = 220; backward(); } 
   }
-  else if (messageTemp == "B") {
-      isLineFollowerMode = false;
-      // Chỉ chặn khi lùi
-      if(!isBlocked)
-      {
-          backward();
-      }
-      else
-      {
-          stopCar();
-          Serial.println("Từ chối lùi: Có vật cản phía sau!");
-      }
-  }
-  else if (messageTemp == "L") {
-      isLineFollowerMode = false;
-      left();
-  }
-  else if (messageTemp == "R") {
-      isLineFollowerMode = false;
-      right();
-  }
+  else if (messageTemp == "L") { isLineFollowerMode = false; Speed = 220; left(); }
+  else if (messageTemp == "R") { isLineFollowerMode = false; Speed = 220; right(); }
   else if (messageTemp == "S") { stopCar(); }
   // -----------------------------------------------------------
 }
@@ -395,44 +319,37 @@ void loop() {
     lastMeasureTime = millis();
     float distance = getDistance();
 
-  // Chỉ kiểm tra vật cản khi xe đang LÙI
-  if (currentDirection == "BACKWARD" 
-      && distance > 0 
-      && distance <= 40.0) {
-      if (!isBlocked) {
-          stopCar();
-          isBlocked = true;
-          String warnMsg = 
-          "CẢNH BÁO: Không thể lùi! Vật cản cách "
-          + String(distance) 
-          + " cm";
-          client.publish(
-              mqtt_topic_warn,
-              warnMsg.c_str()
-          );
-          Serial.print("Đã dừng khi lùi. Khoảng cách: ");
-          Serial.print(distance);
-          Serial.println(" cm");
-      }
-  }
-  else {
-      if (isBlocked) {
-          isBlocked = false;
-          String safeMsg =
-          "AN TOÀN: Có thể lùi lại. Khoảng cách: "
-          + String(distance)
-          + " cm";
-          client.publish(
-              mqtt_topic_warn,
-              safeMsg.c_str()
-          );
-          Serial.println(
-          "Hết vật cản, cho phép lùi."
-          );
-      }
-  }
-  }
+    static int obstacleCount = 0; // Bộ lọc nhiễu sóng siêu âm
 
+    // HC-SR04 hay bị nhiễu sóng trả về giá trị siêu nhỏ (<2cm) khi xe chạy rung xóc
+    if (distance > 2.0 && distance <= 10.0) { 
+      obstacleCount++;
+    } else {
+      obstacleCount = 0;
+    }
+
+    if (obstacleCount >= 2) { // Phải có 2 lần liên tiếp (<10cm) mới tính là vật cản thật
+      // Chỉ phanh khi xe đang LÙI (vì cảm biến ở đằng sau)
+      if (currentDirection == "BACKWARD") {
+        stopCar(); 
+      }
+      
+      if (!obstacleWarned) {
+        obstacleWarned = true;
+        String warnMsg = "CẢNH BÁO: Phát hiện vật cản (" + String(distance) + "cm). Đã phanh khẩn cấp!";
+        client.publish(mqtt_topic_warn, warnMsg.c_str());
+        Serial.println("Phát hiện vật cản! Đã phanh khẩn cấp.");
+        // Không tắt chế độ bám vạch nữa - khi hết vật cản xe sẽ tự chạy tiếp
+      }
+    } else {
+      if (obstacleWarned && obstacleCount == 0) {
+        obstacleWarned = false;
+        String safeMsg = "AN TOÀN: Đã hết vật cản (" + String(distance) + "cm).";
+        client.publish(mqtt_topic_warn, safeMsg.c_str());
+        Serial.println("Đã hết vật cản.");
+      }
+    }
+  }
   // --------------------------------------------------------------
   // --- ĐOẠN THÊM MỚI ODOMETRY: Tính Tốc độ & Quãng đường (chu kỳ 1 giây) ---
   if (millis() - lastOdoTime > 1000) {
@@ -461,29 +378,55 @@ void loop() {
   // -------------------------------------------------------------------------
 
   // --- ĐOẠN THÊM MỚI LINE FOLLOWER SỐ 4: Thuật toán dò vạch 5 mắt ---
-  if (isLineFollowerMode && !isBlocked) {
+  if (isLineFollowerMode) {
     int s1 = digitalRead(IR_1); 
     int s2 = digitalRead(IR_2); 
     int s3 = digitalRead(IR_3); 
     int s4 = digitalRead(IR_4); 
     int s5 = digitalRead(IR_5); 
 
-    // Logic bẻ lái: 1 là vạch đen, 0 là nền trắng
-    if (s3 == 1) {
-      Speed = speedTable[1]; forward(); // Xe ở giữa -> Đi thẳng
-    } else if (s2 == 1) {
-      Speed = speedTable[1]; left();    // Lệch phải -> Vạch ở bên trái -> Rẽ trái
-    } else if (s4 == 1) {
-      Speed = speedTable[1]; right();   // Lệch trái -> Vạch ở bên phải -> Rẽ phải
-    } else if (s1 == 1) {
-      Speed = speedTable[2]; left();    // Lệch cực phải -> Rẽ gắt trái
-    } else if (s5 == 1) {
-      Speed = speedTable[2]; right();   // Lệch cực trái -> Rẽ gắt phải
-    } else if (s1 == 0 && s2 == 0 && s3 == 0 && s4 == 0 && s5 == 0) {
-      stopCar();              // Trắng tinh -> Mất vạch -> Phanh
+    // Debug: In giá trị 5 mắt cảm biến lên Serial Monitor (mỗi 500ms)
+    static unsigned long lastDebug = 0;
+    if (millis() - lastDebug > 500) {
+      lastDebug = millis();
+      Serial.print("IR: ");
+      Serial.print(s1); Serial.print(" ");
+      Serial.print(s2); Serial.print(" ");
+      Serial.print(s3); Serial.print(" ");
+      Serial.print(s4); Serial.print(" ");
+      Serial.println(s5);
     }
-  } else if (isLineFollowerMode && isBlocked) {
-    stopCar(); // Đang bám vạch mà gặp vật cản thì phanh lại
+
+    // Logic bẻ lái: 0 là vạch đen, 1 là nền trắng
+    static unsigned long lostLineTime = 0;
+    
+    // Đếm số lượng mắt cảm biến đang đè lên vạch đen (giá trị = 0)
+    int blackCount = (s1 == 0) + (s2 == 0) + (s3 == 0) + (s4 == 0) + (s5 == 0);
+    
+    // Chỉ chạy khi có đúng 1 hoặc 2 mắt đè vạch
+    // Vì cảm biến siêu âm ở phía sau, mà dò vạch đi tới (forward) nên không cần block ở đây nữa
+    if (blackCount >= 1 && blackCount <= 2) {
+      lostLineTime = 0; // Đang thấy vạch hợp lệ -> reset bộ đếm
+
+      if (s3 == 0) {
+        Speed = 200; forward();  // Mắt giữa thấy vạch -> ĐI THẲNG (chiều đúng)
+      } else if (s2 == 0) {
+        Speed = 200; left();     // Vạch lệch trái -> Rẽ trái
+      } else if (s4 == 0) {
+        Speed = 200; right();    // Vạch lệch phải -> Rẽ phải
+      } else if (s1 == 0) {
+        Speed = 240; left();     // Vạch lệch cực trái -> Rẽ gắt trái
+      } else if (s5 == 0) {
+        Speed = 240; right();    // Vạch lệch cực phải -> Rẽ gắt phải
+      }
+    } else {
+      // Mất vạch (0 mắt) HOẶC đè quá nhiều vạch (3-5 mắt) -> Giữ nguyên hướng, dừng sau 1s
+      if (lostLineTime == 0) lostLineTime = millis();
+      if (millis() - lostLineTime > 1000) {
+        stopCar();
+      }
+    }
   }
   // ------------------------------------------------------------------
+
 }

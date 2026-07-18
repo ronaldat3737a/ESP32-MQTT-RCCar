@@ -166,65 +166,6 @@
         font-weight: bold;
         color: orange;
       }
-      /* ===== SPEED CONTROL ===== */
-
-      .speed-panel {
-        background-color: #333;
-        padding: 15px;
-        border-radius: 10px;
-        max-width: 400px;
-        margin: 15px auto;
-      }
-
-      .speed-title {
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 12px;
-      }
-
-      .speed-buttons {
-        display: flex;
-        justify-content: center;
-        gap: 8px;
-      }
-
-      .speed-btn {
-        width: 80px;
-        height: 60px;
-
-        border: none;
-        border-radius: 10px;
-
-        background-color: #555;
-        color: white;
-
-        font-size: 14px;
-        font-weight: bold;
-
-        cursor: pointer;
-      }
-
-      .speed-btn:hover {
-        background-color: #4caf50;
-      }
-
-      .speed-btn.active {
-        background-color: #ff9800;
-
-        box-shadow: 0 0 10px #ff9800;
-      }
-
-      #speedDisplay {
-        margin-top: 12px;
-
-        font-size: 16px;
-
-        color: #ffcc80;
-
-        font-weight: bold;
-      }
-
-      /* ========================= */
     </style>
     <script>
       const broker = "wss://broker.emqx.io:8084/mqtt";
@@ -234,13 +175,41 @@
 
       const client = mqtt.connect(broker);
 
-      // ===== SPEED CONTROL =====
-      let currentSpeedLevel = 2;
-      // =========================
+      // Khai báo biến demoMode toàn cục
+      let demoMode = false;
+
+      // Hàm bật/tắt chế độ Demo và cập nhật giao diện hiển thị
+      function toggleDemoMode() {
+        demoMode = !demoMode;
+        let btn = document.getElementById("btnDemo");
+        let lockBox = document.getElementById("lockStatus");
+        
+        if (demoMode) {
+          btn.innerText = "🖥️ Tắt Chế độ Mô phỏng (Demo)";
+          btn.style.backgroundColor = "#4caf50";
+          
+          // Giả lập trạng thái đã mở khóa để cho phép điều khiển
+          lockBox.innerText = "🔓 XE ĐÃ MỞ KHÓA (DEMO)";
+          lockBox.className = "alert-safe"; // Chuyển ô khóa sang màu xanh
+        } else {
+          btn.innerText = "🖥️ Bật Chế độ Mô phỏng (Demo)";
+          btn.style.backgroundColor = "#ff9800";
+          
+          // Trả về trạng thái khóa thông thường
+          lockBox.innerText = "🔒 XE ĐANG BỊ KHÓA";
+          lockBox.className = "alert-danger"; // Chuyển ô khóa sang màu đỏ 
+          
+          document.getElementById("telemetryBox").innerHTML =
+          "Vận tốc: 0 cm/s <br> Quãng đường đi: 0 cm";
+
+          resetMap();
+        }
+      }
+
       // BIẾN TOÀN CỤC BẢN ĐỒ
       let currentCommand = "S";
-      let posX = 175,
-        posY = 150,
+      let posX = 0,
+        posY = 0,
         angleDeg = 0;
       let path = [{ x: posX, y: posY }];
       let isTurning = 0,
@@ -335,44 +304,19 @@
         if (client.connected) client.publish(topic_control, "LOCK");
       }
 
-      // ===== SEND SPEED =====
-
-      function setSpeed(level) {
-        let command = "";
-        if (level == 1) command = "SPEED1";
-        else if (level == 2) command = "SPEED2";
-        else if (level == 3) command = "SPEED3";
-        else if (level == 4) command = "SPEED4";
-        if (client.connected) {
-          client.publish(topic_control, command);
-        }
-        currentSpeedLevel = level;
-        updateSpeedUI(level);
-      }
-      // Cập nhật giao diện
-      function updateSpeedUI(level) {
-        let buttons = document.querySelectorAll(".speed-btn");
-        buttons.forEach(function (btn) {
-          btn.classList.remove("active");
-        });
-        document.getElementById("speed" + level).classList.add("active");
-        let pwm = ["", "90", "140", "190", "230"][level];
-        document.getElementById("speedDisplay").innerHTML =
-          "Đang chọn: Mức " + level + " - PWM " + pwm;
-      }
-      // =========================
-
       function sendCommand(cmd) {
         if (client.connected) client.publish(topic_control, cmd);
         currentCommand = cmd;
         if (cmd === "L") isTurning = -1;
         else if (cmd === "R") isTurning = 1;
         else isTurning = 0;
+        if (cmd === "F" || cmd === "B" || cmd === "L" || cmd === "R")
+          setMode("MANUAL_OVERRIDE");
       }
 
       function resetMap() {
-        posX = 175;
-        posY = 150;
+        posX = 0;
+        posY = 0;
         angleDeg = 0;
         path = [{ x: posX, y: posY }];
         lastDistance = currentTotalDistance;
@@ -386,38 +330,87 @@
         if (isTurning !== 0)
           angleDeg += isTurning * TURN_SPEED_DEG_PER_SEC * dt;
 
+        // GIẢ LẬP DI CHUYỂN KHI BẬT CHẾ ĐỘ DEMO
+        if (demoMode) {
+          if (currentCommand === "F" || currentCommand === "B") {
+            let speed = 20; // Giả lập vận tốc xe chạy là 20 cm/s
+            let deltaDist = speed * dt; // Quãng đường đi được trong thời gian dt
+            currentTotalDistance += deltaDist;
+
+            // Cập nhật giao diện Telemetry trực tiếp bằng dữ liệu giả lập
+            document.getElementById("telemetryBox").innerHTML =
+              "Vận tốc (Demo): " + speed + " cm/s <br> Quãng đường đi: " + Math.round(currentTotalDistance) + " cm";
+
+            let directionMultiplier = currentCommand === "B" ? -1 : 1;
+            let rad = ((angleDeg - 90) * Math.PI) / 180;
+            
+            // Cập nhật tọa độ của xe
+            posX += deltaDist * Math.cos(rad) * PIXELS_PER_CM * directionMultiplier;
+            posY += deltaDist * Math.sin(rad) * PIXELS_PER_CM * directionMultiplier;
+            
+            // Lưu tọa độ mới vào lộ trình vẽ đường đi
+            path.push({ x: posX, y: posY });
+          }
+        }        
+        
+
         let canvas = document.getElementById("mapCanvas");
         if (canvas) {
           let ctx = canvas.getContext("2d");
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+          let centerX = canvas.width / 2;
+          let centerY = canvas.height / 2;
+
+          let leftWorld = posX - centerX;
+          let rightWorld = posX + centerX;
+          let topWorld = posY - centerY;
+          let bottomWorld = posY + centerY;
+
           ctx.strokeStyle = "#222";
           ctx.lineWidth = 1;
-          for (let i = 0; i < canvas.width; i += 25) {
+
+          // Vẽ lưới tọa độ dọc di chuyển theo xe
+          let startX = Math.floor(leftWorld / 25) * 25;
+          let endX = Math.ceil(rightWorld / 25) * 25;
+          for (let x = startX; x <= endX; x += 25) {
+            let sX = centerX + (x - posX);
             ctx.beginPath();
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i, canvas.height);
-            ctx.stroke();
-          }
-          for (let i = 0; i < canvas.height; i += 25) {
-            ctx.beginPath();
-            ctx.moveTo(0, i);
-            ctx.lineTo(canvas.width, i);
+            ctx.moveTo(sX, 0);
+            ctx.lineTo(sX, canvas.height);
             ctx.stroke();
           }
 
+          // Vẽ lưới tọa độ ngang di chuyển theo xe
+          let startY = Math.floor(topWorld / 25) * 25;
+          let endY = Math.ceil(bottomWorld / 25) * 25;
+          for (let y = startY; y <= endY; y += 25) {
+            let sY = centerY + (y - posY);
+            ctx.beginPath();
+            ctx.moveTo(0, sY);
+            ctx.lineTo(canvas.width, sY);
+            ctx.stroke();
+          }
+
+          // Vẽ lộ trình đường đi tương đối
           if (path.length > 0) {
             ctx.strokeStyle = "#4caf50";
             ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.moveTo(path[0].x, path[0].y);
-            for (let i = 1; i < path.length; i++)
-              ctx.lineTo(path[i].x, path[i].y);
+            let startSX = centerX + (path[0].x - posX);
+            let startSY = centerY + (path[0].y - posY);
+            ctx.moveTo(startSX, startSY);
+            for (let i = 1; i < path.length; i++) {
+              let sX = centerX + (path[i].x - posX);
+              let sY = centerY + (path[i].y - posY);
+              ctx.lineTo(sX, sY);
+            }
             ctx.stroke();
           }
 
+          // Vẽ xe luôn ở chính giữa màn hình (centerX, centerY)
           ctx.save();
-          ctx.translate(posX, posY);
+          ctx.translate(centerX, centerY);
           ctx.rotate((angleDeg * Math.PI) / 180);
           ctx.fillStyle = "#ff4c4c";
           ctx.beginPath();
@@ -440,6 +433,14 @@
   <body>
     <h2>🚀 BẢNG ĐIỀU KHIỂN AIoT</h2>
     <div id="status">Đang kết nối Server...</div>
+
+    <!-- Nút bật/tắt Chế độ Demo -->
+    <div class="mode-panel">
+      <button class="btn-mode" id="btnDemo" style="background-color: #ff9800; width: 100%;" onclick="toggleDemoMode()">
+        🖥️ Bật Chế độ Mô phỏng (Demo)
+      </button>
+    </div>
+
 
     <!-- --- THÊM MỚI RFID: Khung trạng thái Khóa Xe --- -->
     <div id="lockStatus" class="alert-danger">🔒 XE ĐANG BỊ KHÓA</div>
@@ -468,36 +469,6 @@
     </div>
     <!-- --------------------------------------- -->
 
-    <!-- ===== SPEED CONTROL ===== -->
-
-    <div class="speed-panel">
-      <div class="speed-title">⚡ Điều chỉnh tốc độ</div>
-
-      <div class="speed-buttons">
-        <button class="speed-btn" id="speed1" onclick="setSpeed(1)">
-          🐢<br />
-          Mức 1
-        </button>
-
-        <button class="speed-btn active" id="speed2" onclick="setSpeed(2)">
-          🚗<br />
-          Mức 2
-        </button>
-
-        <button class="speed-btn" id="speed3" onclick="setSpeed(3)">
-          🏎<br />
-          Mức 3
-        </button>
-
-        <button class="speed-btn" id="speed4" onclick="setSpeed(4)">
-          🚀<br />
-          Mức 4
-        </button>
-      </div>
-
-      <div id="speedDisplay">Đang chọn: Mức 2 - PWM 140</div>
-    </div>
-    <!-- ======================== -->
     <!-- Khung hiển thị cảnh báo (Siêu âm / RFID lỗi) -->
     <div id="warningBox">Chưa có dữ liệu cảm biến...</div>
 
