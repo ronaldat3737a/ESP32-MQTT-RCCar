@@ -10,8 +10,8 @@
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 // ------------------------------------------------------
 
-const char* ssid = "Trung 5G";
-const char* password = "phuongthao294";
+const char* ssid = "TP-Link_DE3A";
+const char* password = "87111873";
 
 const char* mqtt_server = "broker.emqx.io";
 const int mqtt_port = 1883;
@@ -20,7 +20,7 @@ const char* mqtt_topic = "hust/iot/rccar/control_v1";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-int Speed = 220; // Tốc độ khởi tạo (tăng lên 220 để thắng ma sát do pin yếu)
+int Speed = 255; // Tốc độ khởi tạo (đã tăng tối đa 255 để tránh tiếng rít)
 int enA = 5;
 int enB = 23;
 int IN1 = 22;
@@ -185,17 +185,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
   } 
   else if (messageTemp == "MANUAL") {
     isLineFollowerMode = false;
-    Speed = 220; // Trả lại tốc độ mặc định
+    Speed = 255; // Trả lại tốc độ mặc định tối đa
     stopCar();
     Serial.println("Chế độ: ĐIỀU KHIỂN BẰNG TAY");
   }
-  else if (messageTemp == "F") { isLineFollowerMode = false; Speed = 220; forward(); }
+  else if (messageTemp == "F") { isLineFollowerMode = false; Speed = 255; forward(); }
   else if (messageTemp == "B") { 
     if (obstacleWarned) stopCar(); 
-    else { isLineFollowerMode = false; Speed = 220; backward(); } 
+    else { isLineFollowerMode = false; Speed = 255; backward(); } 
   }
-  else if (messageTemp == "L") { isLineFollowerMode = false; Speed = 220; left(); }
-  else if (messageTemp == "R") { isLineFollowerMode = false; Speed = 220; right(); }
+  else if (messageTemp == "L") { isLineFollowerMode = false; Speed = 255; left(); }
+  else if (messageTemp == "R") { isLineFollowerMode = false; Speed = 255; right(); }
   else if (messageTemp == "S") { stopCar(); }
   // -----------------------------------------------------------
 }
@@ -379,11 +379,11 @@ void loop() {
 
   // --- ĐOẠN THÊM MỚI LINE FOLLOWER SỐ 4: Thuật toán dò vạch 5 mắt ---
   if (isLineFollowerMode) {
-    int s1 = digitalRead(IR_1); 
-    int s2 = digitalRead(IR_2); 
-    int s3 = digitalRead(IR_3); 
-    int s4 = digitalRead(IR_4); 
-    int s5 = digitalRead(IR_5); 
+    int s1 = digitalRead(IR_1); // Trái ngoài cùng
+    int s2 = digitalRead(IR_2); // Trái trong
+    int s3 = digitalRead(IR_3); // Giữa
+    int s4 = digitalRead(IR_4); // Phải trong
+    int s5 = digitalRead(IR_5); // Phải ngoài cùng
 
     // Debug: In giá trị 5 mắt cảm biến lên Serial Monitor (mỗi 500ms)
     static unsigned long lastDebug = 0;
@@ -397,30 +397,69 @@ void loop() {
       Serial.println(s5);
     }
 
-    // Logic bẻ lái: 0 là vạch đen, 1 là nền trắng
+    // Logic bẻ lái: 0 = vạch đen, 1 = nền trắng
+    // Lưu hướng rẽ cuối cùng để xử lý khi mất vạch (11111)
+    static String lastTurn = "LEFT";
     static unsigned long lostLineTime = 0;
-    
-    // Đếm số lượng mắt cảm biến đang đè lên vạch đen (giá trị = 0)
-    int blackCount = (s1 == 0) + (s2 == 0) + (s3 == 0) + (s4 == 0) + (s5 == 0);
-    
-    // Chỉ chạy khi có đúng 1 hoặc 2 mắt đè vạch
-    // Vì cảm biến siêu âm ở phía sau, mà dò vạch đi tới (forward) nên không cần block ở đây nữa
-    if (blackCount >= 1 && blackCount <= 2) {
-      lostLineTime = 0; // Đang thấy vạch hợp lệ -> reset bộ đếm
 
-      if (s3 == 0) {
-        Speed = 200; forward();  // Mắt giữa thấy vạch -> ĐI THẲNG (chiều đúng)
-      } else if (s2 == 0) {
-        Speed = 200; left();     // Vạch lệch trái -> Rẽ trái
-      } else if (s4 == 0) {
-        Speed = 200; right();    // Vạch lệch phải -> Rẽ phải
-      } else if (s1 == 0) {
-        Speed = 240; left();     // Vạch lệch cực trái -> Rẽ gắt trái
-      } else if (s5 == 0) {
-        Speed = 240; right();    // Vạch lệch cực phải -> Rẽ gắt phải
+    int blackCount = (s1 == 0) + (s2 == 0) + (s3 == 0) + (s4 == 0) + (s5 == 0);
+
+    if (blackCount >= 1 && blackCount <= 3) {
+      lostLineTime = 0; // Đang thấy vạch -> reset timer
+
+      // === ĐI THẲNG: chỉ mắt giữa thấy vạch (11011) ===
+      if (s3 == 0 && s2 == 1 && s4 == 1) {
+        Speed = 200; forward();
       }
-    } else {
-      // Mất vạch (0 mắt) HOẶC đè quá nhiều vạch (3-5 mắt) -> Giữ nguyên hướng, dừng sau 1s
+      // === RẼ PHẢI: vạch lệch sang phải ===
+      else if (s3 == 0 && s4 == 0) {
+        // 11001 hoặc 10001 -> lệch phải nhẹ
+        Speed = 200; right();
+        lastTurn = "RIGHT";
+      }
+      else if (s4 == 0 && s3 == 1) {
+        // 11101 -> vạch ở bên phải
+        Speed = 200; right();
+        lastTurn = "RIGHT";
+      }
+      else if (s5 == 0 && s4 == 1) {
+        // 11110 -> vạch lệch cực phải, rẽ gắt
+        Speed = 240; right();
+        lastTurn = "RIGHT";
+      }
+      // === RẼ TRÁI: vạch lệch sang trái (đối xứng) ===
+      else if (s3 == 0 && s2 == 0) {
+        // 10011 hoặc 10010 -> lệch trái nhẹ
+        Speed = 200; left();
+        lastTurn = "LEFT";
+      }
+      else if (s2 == 0 && s3 == 1) {
+        // 10111 -> vạch ở bên trái
+        Speed = 200; left();
+        lastTurn = "LEFT";
+      }
+      else if (s1 == 0 && s2 == 1) {
+        // 01111 -> vạch lệch cực trái, rẽ gắt
+        Speed = 240; left();
+        lastTurn = "LEFT";
+      }
+    }
+    // === MẤT VẠCH (11111): Quay theo hướng rẽ cuối cùng để tìm lại ===
+    else if (blackCount == 0) {
+      if (lostLineTime == 0) lostLineTime = millis();
+      if (millis() - lostLineTime > 2000) {
+        // Mất vạch quá 2 giây -> dừng hẳn (tránh quay vô hạn)
+        stopCar();
+        Serial.println("LINE FOLLOWER: Mất vạch quá lâu -> DỪNG!");
+      } else {
+        // Quay theo hướng cuối cùng để tìm lại vạch
+        Speed = 200;
+        if (lastTurn == "RIGHT") right();
+        else left();
+      }
+    }
+    else {
+      // blackCount >= 4: Đè quá nhiều vạch (ngã tư / lỗi) -> dừng
       if (lostLineTime == 0) lostLineTime = millis();
       if (millis() - lostLineTime > 1000) {
         stopCar();
