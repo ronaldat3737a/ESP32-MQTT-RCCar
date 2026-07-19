@@ -183,24 +183,24 @@
         demoMode = !demoMode;
         let btn = document.getElementById("btnDemo");
         let lockBox = document.getElementById("lockStatus");
-        
+
         if (demoMode) {
           btn.innerText = "🖥️ Tắt Chế độ Mô phỏng (Demo)";
           btn.style.backgroundColor = "#4caf50";
-          
+
           // Giả lập trạng thái đã mở khóa để cho phép điều khiển
           lockBox.innerText = "🔓 XE ĐÃ MỞ KHÓA (DEMO)";
           lockBox.className = "alert-safe"; // Chuyển ô khóa sang màu xanh
         } else {
           btn.innerText = "🖥️ Bật Chế độ Mô phỏng (Demo)";
           btn.style.backgroundColor = "#ff9800";
-          
+
           // Trả về trạng thái khóa thông thường
           lockBox.innerText = "🔒 XE ĐANG BỊ KHÓA";
-          lockBox.className = "alert-danger"; // Chuyển ô khóa sang màu đỏ 
-          
+          lockBox.className = "alert-danger"; // Chuyển ô khóa sang màu đỏ
+
           document.getElementById("telemetryBox").innerHTML =
-          "Vận tốc: 0 cm/s <br> Quãng đường đi: 0 cm";
+            "Vận tốc: 0 cm/s <br> Quãng đường đi: 0 cm";
 
           resetMap();
         }
@@ -339,20 +339,25 @@
 
             // Cập nhật giao diện Telemetry trực tiếp bằng dữ liệu giả lập
             document.getElementById("telemetryBox").innerHTML =
-              "Vận tốc (Demo): " + speed + " cm/s <br> Quãng đường đi: " + Math.round(currentTotalDistance) + " cm";
+              "Vận tốc (Demo): " +
+              speed +
+              " cm/s <br> Quãng đường đi: " +
+              Math.round(currentTotalDistance) +
+              " cm";
 
             let directionMultiplier = currentCommand === "B" ? -1 : 1;
             let rad = ((angleDeg - 90) * Math.PI) / 180;
-            
+
             // Cập nhật tọa độ của xe
-            posX += deltaDist * Math.cos(rad) * PIXELS_PER_CM * directionMultiplier;
-            posY += deltaDist * Math.sin(rad) * PIXELS_PER_CM * directionMultiplier;
-            
+            posX +=
+              deltaDist * Math.cos(rad) * PIXELS_PER_CM * directionMultiplier;
+            posY +=
+              deltaDist * Math.sin(rad) * PIXELS_PER_CM * directionMultiplier;
+
             // Lưu tọa độ mới vào lộ trình vẽ đường đi
             path.push({ x: posX, y: posY });
           }
-        }        
-        
+        }
 
         let canvas = document.getElementById("mapCanvas");
         if (canvas) {
@@ -431,16 +436,20 @@
     </script>
   </head>
   <body>
-    <h2>🚀 BẢNG ĐIỀU KHIỂN AIoT</h2>
+    <h2>BẢNG ĐIỀU KHIỂN XE Ô TÔ TỰ HÀNH ĐA CHỨC NĂNG </h2>
     <div id="status">Đang kết nối Server...</div>
 
     <!-- Nút bật/tắt Chế độ Demo -->
     <div class="mode-panel">
-      <button class="btn-mode" id="btnDemo" style="background-color: #ff9800; width: 100%;" onclick="toggleDemoMode()">
+      <button
+        class="btn-mode"
+        id="btnDemo"
+        style="background-color: #ff9800; width: 100%"
+        onclick="toggleDemoMode()"
+      >
         🖥️ Bật Chế độ Mô phỏng (Demo)
       </button>
     </div>
-
 
     <!-- --- THÊM MỚI RFID: Khung trạng thái Khóa Xe --- -->
     <div id="lockStatus" class="alert-danger">🔒 XE ĐANG BỊ KHÓA</div>
